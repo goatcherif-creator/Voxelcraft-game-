@@ -1,0 +1,8 @@
+{
+  "name": "Les Chroniques de la Faille d'Améthyste",
+  "description": "Map aventure Minecraft épique avec Kaelen le Vagabond des Failles, simulateur de quête jouable, générateur de blocs de commande et codex interactif.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
