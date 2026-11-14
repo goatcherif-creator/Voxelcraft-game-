@@ -2,9 +2,10 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { 
   Play, Pause, RotateCcw, Volume2, VolumeX, Shield, Zap, Sparkles, 
   Anchor, Eye, Swords, Apple, Pickaxe, Compass, Crosshair, Heart, ArrowUp, ArrowDown, ArrowLeft, ArrowRight,
-  Timer, Trophy, Medal, Flame, Check
+  Timer, Trophy, Medal, Flame, Check, User, Maximize, Minimize, Settings, Sliders, X, Monitor, HelpCircle
 } from 'lucide-react';
 import { soundFx } from '../utils/audio';
+import { drawRiftAdventurer, drawCorruptedZombieSprite } from '../utils/characterRenderer';
 
 type GameScreenState = 'TITLE' | 'PLAYING' | 'GAME_OVER' | 'VICTORY';
 type SpeedrunRank = 'S' | 'A' | 'B' | 'C';
@@ -66,6 +67,7 @@ interface BossTelegraph {
 
 interface GameCanvasProps {
   initialChapter?: number;
+  onOpenCodex?: () => void;
 }
 
 // Format seconds into MM:SS.ms
@@ -107,11 +109,16 @@ const getSpeedrunRank = (chapter: number, timeSec: number): { rank: SpeedrunRank
 
 export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // High level UI & State
   const [gameState, setGameState] = useState<GameScreenState>('PLAYING');
   const [selectedChapter, setSelectedChapter] = useState<number>(initialChapter);
   const [isMuted, setIsMuted] = useState<boolean>(false);
+  
+  // Fullscreen & Settings State
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
   
   // Time Attack (Contre-la-montre) State
   const [isTimeAttack, setIsTimeAttack] = useState<boolean>(false);
@@ -135,6 +142,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
   const [amethystShards, setAmethystShards] = useState<number>(45);
   const [xpLevel, setXpLevel] = useState<number>(14);
   const [score, setScore] = useState<number>(0);
+  const [playerSkin, setPlayerSkin] = useState<'kaelen' | 'aria' | 'thorne'>('kaelen');
 
   // Active Hotbar Slot (1 to 7)
   const [activeSlot, setActiveSlot] = useState<number>(1);
@@ -173,6 +181,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
     startTime: number;
     timerActive: boolean;
     currentRunTime: number;
+    playerAttackAnim: number;
     chapter: number;
     bossActive: boolean;
     screenShake: number;
@@ -194,6 +203,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
     startTime: performance.now(),
     timerActive: true,
     currentRunTime: 0,
+    playerAttackAnim: 0,
     chapter: initialChapter,
     bossActive: false,
     screenShake: 0,
@@ -315,6 +325,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
     const s = stateRef.current;
     if (s.gameState !== 'PLAYING') return;
 
+    s.playerAttackAnim = 1.0;
     soundFx.playSlash();
     const attackX = s.player.facing === 'right' ? s.player.x + 36 : s.player.x - 36;
     const attackY = s.player.y;
@@ -679,6 +690,74 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
     };
   }, [triggerActiveSlot, performSwordAttack]);
 
+  // Toggle Fullscreen using standard Fullscreen API with cross-browser compatibility
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      const container = containerRef.current;
+      if (!container) return;
+
+      const doc = document as any;
+      const isFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+
+      if (!isFull) {
+        if (container.requestFullscreen) {
+          await container.requestFullscreen();
+        } else if ((container as any).webkitRequestFullscreen) {
+          await (container as any).webkitRequestFullscreen();
+        } else if ((container as any).mozRequestFullScreen) {
+          await (container as any).mozRequestFullScreen();
+        } else if ((container as any).msRequestFullscreen) {
+          await (container as any).msRequestFullscreen();
+        }
+        soundFx.playAmethystChime(1.5);
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          await doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          await doc.msExitFullscreen();
+        }
+        soundFx.playAmethystChime(1.1);
+      }
+    } catch (err) {
+      console.warn('Erreur lors du basculement en plein écran:', err);
+    }
+  }, []);
+
+  // Listen to fullscreen changes across all browser engines
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const doc = document as any;
+      const isFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      setIsFullscreen(isFull);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
   // Initial chapter setup
   useEffect(() => {
     loadChapter(initialChapter);
@@ -719,6 +798,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
         if (s.timerActive) {
           s.currentRunTime = (performance.now() - s.startTime) / 1000;
           setElapsedTime(s.currentRunTime);
+        }
+
+        // Decay attack animation
+        if (s.playerAttackAnim > 0) {
+          s.playerAttackAnim = Math.max(0, s.playerAttackAnim - dt * 4.5);
         }
 
         // 1. Movement
@@ -1148,94 +1232,43 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
           ctx.fillRect(en.x + (en.facing === 'left' ? -10 : 2), en.y - 12, 4, 3);
           ctx.fillRect(en.x + (en.facing === 'left' ? -3 : 9), en.y - 12, 4, 3);
         } else {
-          ctx.fillStyle = '#15803d';
-          ctx.fillRect(en.x - 12, en.y - 18, 24, 32);
-
-          ctx.fillStyle = '#c084fc';
-          ctx.fillRect(en.x - 6, en.y - 10, 8, 8);
-
-          ctx.fillStyle = '#ef4444';
-          ctx.fillRect(en.x + (en.facing === 'left' ? -8 : 2), en.y - 12, 4, 3);
-          ctx.fillRect(en.x + (en.facing === 'left' ? -2 : 8), en.y - 12, 4, 3);
+          // Corrupted Zombie humanoid sprite with protruding amethyst crystals
+          drawCorruptedZombieSprite(ctx, en.x, en.y, en.facing, time / 1000, en.hp / en.maxHp);
         }
-
-        const barWidth = en.radius * 1.8;
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.fillRect(en.x - barWidth / 2, en.y - en.radius - 12, barWidth, 4);
-        ctx.fillStyle = en.type.includes('boss') ? '#ef4444' : '#22c55e';
-        ctx.fillRect(en.x - barWidth / 2, en.y - en.radius - 12, barWidth * (en.hp / en.maxHp), 4);
 
         ctx.restore();
       });
 
-      // Render Kaelen
-      ctx.save();
-      ctx.shadowColor = '#a855f7';
-      ctx.shadowBlur = 15;
-      ctx.fillStyle = 'rgba(147, 51, 234, 0.45)';
-      ctx.beginPath();
-      ctx.moveTo(s.kaelen.x - 5, s.kaelen.y);
-      ctx.lineTo(s.kaelen.x - 36, s.kaelen.y - 28);
-      ctx.lineTo(s.kaelen.x - 14, s.kaelen.y + 12);
-      ctx.closePath();
-      ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(s.kaelen.x + 5, s.kaelen.y);
-      ctx.lineTo(s.kaelen.x + 36, s.kaelen.y - 28);
-      ctx.lineTo(s.kaelen.x + 14, s.kaelen.y + 12);
-      ctx.closePath();
-      ctx.fill();
+      // 7. Render Kaelen (Companion directly modeled on the photo with obsidian mask, cape, runes, and Volt)
+      drawRiftAdventurer(ctx, {
+        x: s.kaelen.x,
+        y: s.kaelen.y,
+        facing: s.kaelen.facing,
+        isMoving: Math.abs(s.kaelen.vx) > 5 || Math.abs(s.kaelen.vy) > 5,
+        animTime: time / 1000,
+        hasVolt: true,
+        name: "Kaelen & Volt",
+        nameColor: "#c084fc",
+        isKaelenCompanion: true,
+        skinVariant: 'kaelen',
+        isAttacking: false
+      });
 
-      ctx.fillStyle = '#0f172a';
-      ctx.fillRect(s.kaelen.x - 12, s.kaelen.y - 20, 24, 36);
-
-      ctx.fillStyle = '#c084fc';
-      ctx.fillRect(s.kaelen.x - 8, s.kaelen.y - 10, 4, 18);
-      ctx.fillRect(s.kaelen.x + 4, s.kaelen.y - 10, 4, 18);
-
-      ctx.fillStyle = '#18181b';
-      ctx.fillRect(s.kaelen.x - 8, s.kaelen.y - 22, 16, 12);
-      ctx.fillStyle = '#d946ef';
-      ctx.fillRect(s.kaelen.x + (s.kaelen.facing === 'left' ? -6 : 1), s.kaelen.y - 18, 5, 4);
-
-      const frogX = s.kaelen.x + (s.kaelen.facing === 'left' ? 10 : -10);
-      const frogY = s.kaelen.y - 22;
-      ctx.shadowColor = '#4ade80';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#4ade80';
-      ctx.beginPath();
-      ctx.arc(frogX, frogY, 4.5, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#c084fc';
-      ctx.font = 'bold 10px Plus Jakarta Sans, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText("Kaelen & Volt", s.kaelen.x, s.kaelen.y - 30);
-      ctx.restore();
-
-      // Render Player
-      ctx.save();
-      ctx.shadowColor = '#60a5fa';
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = '#1e293b';
-      ctx.fillRect(s.player.x - 12, s.player.y - 18, 24, 32);
-
-      if (activeSlot === 1) {
-        ctx.fillStyle = '#818cf8';
-        ctx.fillRect(s.player.x + (s.player.facing === 'right' ? 10 : -16), s.player.y - 12, 5, 18);
-      } else if (activeSlot === 2) {
-        ctx.fillStyle = '#c084fc';
-        ctx.fillRect(s.player.x + (s.player.facing === 'right' ? 8 : -14), s.player.y - 6, 8, 12);
-      } else if (activeSlot === 3) {
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillRect(s.player.x + (s.player.facing === 'right' ? 10 : -16), s.player.y - 10, 4, 16);
-      }
-
-      ctx.fillStyle = '#38bdf8';
-      ctx.font = 'bold 10px Plus Jakarta Sans, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText("Élu de l'Écho (Toi)", s.player.x, s.player.y - 26);
-      ctx.restore();
+      // 8. Render Player (The Hero, fully modeled as the masked adventurer with flowing cape and runic broadsword)
+      drawRiftAdventurer(ctx, {
+        x: s.player.x,
+        y: s.player.y,
+        facing: s.player.facing,
+        isMoving: Math.abs(s.player.vx) > 5 || Math.abs(s.player.vy) > 5,
+        isAttacking: s.playerAttackAnim > 0,
+        attackProgress: 1 - s.playerAttackAnim,
+        animTime: time / 1000,
+        hasVolt: false,
+        name: playerSkin === 'kaelen' ? "Kaelen (Toi)" : playerSkin === 'aria' ? "Aria (Toi)" : "Thorne (Toi)",
+        nameColor: "#38bdf8",
+        skinVariant: playerSkin,
+        activeItem: activeSlot
+      });
 
       // Damage Numbers
       s.damageNumbers.forEach(d => {
@@ -1302,30 +1335,39 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
   }, [activeSlot, isTimeAttack, speedrunRecords]);
 
   return (
-    <div className="w-full bg-[#100d1d] border border-purple-900/50 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
-      {/* Top Bar: Chapter selector, Time Attack Toggle & Game Controls */}
-      <div className="p-4 border-b border-purple-900/40 bg-[#161228]/90 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-purple-950 border border-purple-700/60 flex items-center justify-center text-purple-300">
-            <Swords className="w-5 h-5" />
+    <div
+      ref={containerRef}
+      className={`w-full h-full flex-1 min-h-0 bg-[#100d1d] border border-purple-900/50 rounded-xl overflow-hidden shadow-2xl flex flex-col transition-all ${
+        isFullscreen
+          ? 'fixed inset-0 z-50 w-screen h-screen rounded-none border-none bg-[#0a0715]'
+          : ''
+      }`}
+    >
+      {/* Top Bar: Chapter selector, Time Attack Toggle & Game Controls (Compact Dashboard) */}
+      <div className="shrink-0 px-3 py-2 border-b border-purple-900/40 bg-[#161228]/95 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg bg-purple-950 border border-purple-700/60 flex items-center justify-center text-purple-300 shrink-0">
+            <Swords className="w-4 h-4" />
           </div>
-          <div>
-            <h3 className="text-base font-bold text-white font-cinzel tracking-wide flex items-center gap-2">
-              <span>Voxelcraft : Faille d'Améthyste</span>
-              {isTimeAttack && (
-                <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
-                  MODE CONTRE-LA-MONTRE
-                </span>
-              )}
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-bold text-white font-cinzel tracking-wide whitespace-nowrap">
+              Voxelcraft : Faille d'Améthyste
             </h3>
-            <div className="flex items-center gap-2 text-xs text-slate-400">
-              <span className="text-purple-300 font-medium">Contrôles : ZQSD ou WASD · 1-7 pour la Barre d'action</span>
-            </div>
+            {isTimeAttack && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+                CONTRE-LA-MONTRE
+              </span>
+            )}
+            {isFullscreen && (
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/40 font-bold">
+                PLEIN ÉCRAN
+              </span>
+            )}
           </div>
         </div>
 
         {/* Level Tabs */}
-        <div className="flex items-center gap-1.5 p-1 bg-black/50 rounded-lg border border-purple-950">
+        <div className="flex items-center gap-1 p-0.5 bg-black/50 rounded-lg border border-purple-950 overflow-x-auto max-w-full">
           {[
             { id: 1, name: "1. Village Cristallisé" },
             { id: 2, name: "2. Ignis Primus (Boss)" },
@@ -1335,9 +1377,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
             <button
               key={ch.id}
               onClick={() => loadChapter(ch.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-all whitespace-nowrap cursor-pointer ${
+              className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-all whitespace-nowrap cursor-pointer ${
                 selectedChapter === ch.id
-                  ? 'bg-purple-600 text-white shadow-md'
+                  ? 'bg-purple-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-purple-900/30'
               }`}
             >
@@ -1346,29 +1388,67 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
           ))}
         </div>
 
-        {/* Mode Switcher, Audio, Reset & Leaderboard */}
-        <div className="flex items-center gap-2">
+        {/* Mode Switcher, Fullscreen, Settings/Guide, Audio, Reset & Leaderboard */}
+        <div className="flex items-center gap-1.5">
+          {/* Mode Plein Écran (API Fullscreen) Button */}
+          <button
+            onClick={toggleFullscreen}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+              isFullscreen
+                ? 'bg-purple-600 text-white border-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)]'
+                : 'bg-[#18122c] hover:bg-[#231b40] text-purple-300 border-purple-700/60 hover:border-purple-400'
+            }`}
+            title={isFullscreen ? "Quitter le Mode Plein Écran (Échap)" : "Activer le Mode Plein Écran (API Fullscreen)"}
+          >
+            {isFullscreen ? <Minimize className="w-3.5 h-3.5 text-white" /> : <Maximize className="w-3.5 h-3.5 text-purple-300" />}
+            <span className="hidden lg:inline font-sans">{isFullscreen ? "Quitter Plein Écran" : "Mode Plein Écran"}</span>
+          </button>
+
+          {/* Retractable Settings & Instructions Toggle Button */}
+          <button
+            onClick={() => {
+              setShowSettings(prev => !prev);
+              if (!showSettings) setShowLeaderboard(false);
+            }}
+            className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg border transition-colors cursor-pointer ${
+              showSettings
+                ? 'bg-purple-600 text-white border-purple-400'
+                : 'text-slate-300 hover:text-white bg-slate-900/60 border-slate-700 hover:bg-slate-800'
+            }`}
+            title="Panneau rétractable : Paramètres & Instructions"
+          >
+            <Settings className="w-3.5 h-3.5 text-purple-300" />
+            <span className="hidden xl:inline text-[11px]">Paramètres & Aide</span>
+          </button>
+
           {/* Time Attack Mode Toggle Button */}
           <button
             onClick={toggleTimeAttack}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold rounded-lg border transition-all cursor-pointer ${
               isTimeAttack
-                ? 'bg-amber-500 text-black border-amber-300 shadow-[0_0_15px_rgba(250,204,21,0.5)]'
+                ? 'bg-amber-500 text-black border-amber-300 shadow-[0_0_12px_rgba(250,204,21,0.5)]'
                 : 'bg-[#18122c] hover:bg-[#231b40] text-amber-300 border-amber-500/50 hover:border-amber-400'
             }`}
             title="Activer/Désactiver le Mode Contre-la-montre"
           >
-            <Timer className="w-4 h-4" />
-            <span>{isTimeAttack ? "Chrono ACTIF" : "Contre-la-montre"}</span>
+            <Timer className="w-3.5 h-3.5" />
+            <span className="hidden xl:inline">{isTimeAttack ? "Chrono ACTIF" : "Contre-la-montre"}</span>
           </button>
 
           {/* Leaderboard Button */}
           <button
-            onClick={() => setShowLeaderboard(!showLeaderboard)}
-            className="p-2 text-xs text-slate-300 hover:text-white bg-slate-900/60 rounded-md border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+            onClick={() => {
+              setShowLeaderboard(prev => !prev);
+              if (!showLeaderboard) setShowSettings(false);
+            }}
+            className={`p-1.5 text-xs rounded-lg border transition-colors cursor-pointer ${
+              showLeaderboard
+                ? 'bg-amber-500/20 text-amber-300 border-amber-400'
+                : 'text-slate-300 hover:text-white bg-slate-900/60 border-slate-700 hover:bg-slate-800'
+            }`}
             title="Tableau des Records de Vitesse"
           >
-            <Trophy className="w-4 h-4 text-amber-400" />
+            <Trophy className="w-3.5 h-3.5 text-amber-400" />
           </button>
 
           {/* Sound Toggle */}
@@ -1378,79 +1458,72 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
               setIsMuted(newMuted);
               soundFx.setMuted(newMuted);
             }}
-            className="p-2 text-xs text-slate-300 hover:text-white bg-slate-900/60 rounded-md border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 text-xs text-slate-300 hover:text-white bg-slate-900/60 rounded-lg border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
             title={isMuted ? "Activer le son" : "Couper le son"}
           >
-            {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-purple-400" />}
+            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-rose-400" /> : <Volume2 className="w-3.5 h-3.5 text-purple-400" />}
           </button>
 
           {/* Reset Arena */}
           <button
             onClick={() => loadChapter(selectedChapter)}
-            className="p-2 text-xs text-slate-300 hover:text-white bg-slate-900/60 rounded-md border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
+            className="p-1.5 text-xs text-slate-300 hover:text-white bg-slate-900/60 rounded-lg border border-slate-700 hover:bg-slate-800 transition-colors cursor-pointer"
             title="Recommencer le combat"
           >
-            <RotateCcw className="w-4 h-4" />
+            <RotateCcw className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Speedrun Leaderboard Panel Drawer */}
-      {showLeaderboard && (
-        <div className="px-6 py-4 bg-[#140e29] border-b border-purple-900/60 space-y-3 animate-in fade-in duration-200">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Trophy className="w-4 h-4 text-amber-400" />
-              <h4 className="text-sm font-bold text-white font-cinzel">Tableau des Records de Vitesse Personnels</h4>
-            </div>
-            <button
-              onClick={() => {
-                const defaults = { 1: 34.5, 2: 52.8, 3: 41.2, 4: 78.4 };
-                setSpeedrunRecords(defaults);
-                localStorage.setItem('voxelcraft_speedrun_records', JSON.stringify(defaults));
-                soundFx.playAmethystChime(1.5);
+      {/* Minecraft HUD Bar: Avatar/Skin, Hearts, Chrono, Bossbar, Inventory */}
+      <div className="shrink-0 px-3 py-1.5 bg-[#0c0917] border-b border-purple-950/80 flex flex-wrap items-center justify-between gap-2">
+        {/* Character Avatar & Skin Switcher */}
+        <div className="flex items-center gap-2 bg-purple-950/40 border border-purple-800/40 px-2.5 py-1 rounded-lg">
+          <div className="relative">
+            <img
+              src="/src/assets/images/kaelen_portrait_1794053201894.jpg"
+              alt="Avatar Kaelen"
+              referrerPolicy="no-referrer"
+              className="w-6 h-6 rounded-full object-cover border border-purple-400 shadow-[0_0_8px_rgba(168,85,247,0.4)]"
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/public/assets/aistudio/Screenshot_20261110-173904.Files_by_Google_12a81208_12a81208.png';
               }}
-              className="text-[11px] text-slate-400 hover:text-rose-400 underline cursor-pointer"
+            />
+            <span
+              className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border border-black flex items-center justify-center text-[6px]"
+              title="Volt veille sur vous"
             >
-              Réinitialiser les records
-            </button>
+              🐸
+            </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="flex items-center gap-1">
             {[
-              { ch: 1, name: "Village Cristallisé", boss: "Zombies" },
-              { ch: 2, name: "Mer de Lave", boss: "Ignis Primus" },
-              { ch: 3, name: "Forteresse End", boss: "Rôdeurs" },
-              { ch: 4, name: "Faille Finale", boss: "Ombre du Vide" }
-            ].map(lvl => {
-              const rec = speedrunRecords[lvl.ch] || 999;
-              const rank = getSpeedrunRank(lvl.ch, rec);
-
-              return (
-                <div key={lvl.ch} className="p-3 rounded-xl bg-[#0b0817] border border-purple-900/40 space-y-1">
-                  <div className="text-[11px] text-slate-400 font-mono">Acte 0{lvl.ch} · {lvl.boss}</div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-base font-bold font-mono text-amber-300 tabular-nums">
-                      {formatChrono(rec)}
-                    </span>
-                    <span 
-                      className="text-xs font-bold font-mono px-2 py-0.5 rounded border"
-                      style={{ color: rank.color, borderColor: rank.color, backgroundColor: `${rank.color}15` }}
-                    >
-                      {rank.rank}
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
+              { id: 'kaelen', label: 'Kaelen' },
+              { id: 'aria', label: 'Aria' },
+              { id: 'thorne', label: 'Thorne' }
+            ].map(skin => (
+              <button
+                key={skin.id}
+                onClick={() => {
+                  setPlayerSkin(skin.id as 'kaelen' | 'aria' | 'thorne');
+                  soundFx.playAmethystChime(1.4);
+                }}
+                className={`px-1.5 py-0.5 text-[10px] font-mono rounded transition-all cursor-pointer ${
+                  playerSkin === skin.id
+                    ? 'bg-purple-600 text-white font-bold shadow-sm'
+                    : 'bg-black/40 text-slate-400 hover:text-slate-200 hover:bg-purple-900/40'
+                }`}
+                title={`Incarnation : ${skin.label}`}
+              >
+                {skin.label}
+              </button>
+            ))}
           </div>
         </div>
-      )}
 
-      {/* Minecraft HUD Bar: Hearts, Timer in Contre-la-montre, Bossbar */}
-      <div className="px-5 py-3 bg-[#0c0917] border-b border-purple-950/80 flex flex-wrap items-center justify-between gap-4">
         {/* Minecraft 10 Hearts HUD */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <div className="flex items-center gap-0.5" title={`${playerHp}/100 PV`}>
             {Array.from({ length: 10 }).map((_, i) => {
               const heartValue = (i + 1) * 10;
@@ -1460,73 +1533,235 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
               return (
                 <span
                   key={i}
-                  className={`text-sm transition-transform ${isFilled ? 'text-rose-500 scale-100' : isHalf ? 'text-rose-400 scale-95 opacity-80' : 'text-slate-700'}`}
+                  className={`text-xs sm:text-sm transition-transform ${isFilled ? 'text-rose-500 scale-100' : isHalf ? 'text-rose-400 scale-95 opacity-80' : 'text-slate-700'}`}
                 >
                   ♥
                 </span>
               );
             })}
           </div>
-          <span className="text-xs text-slate-300 font-mono tabular-nums ml-1">
-            {playerHp} / 100 PV
+          <span className="text-[11px] text-slate-300 font-mono tabular-nums">
+            {playerHp}/100
           </span>
         </div>
 
         {/* Time Attack Live Chrono Badge in HUD */}
         {isTimeAttack ? (
-          <div className="flex items-center gap-2 px-3 py-1 bg-amber-950/50 border border-amber-500/50 rounded-lg shadow-[0_0_12px_rgba(250,204,21,0.2)]">
-            <Timer className="w-4 h-4 text-amber-400 animate-pulse" />
-            <span className="text-xs text-amber-300 font-mono font-bold tabular-nums">
-              CHRONO : {formatChrono(elapsedTime)}
+          <div className="flex items-center gap-2 px-2.5 py-0.5 bg-amber-950/50 border border-amber-500/50 rounded-md">
+            <Timer className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            <span className="text-[11px] text-amber-300 font-mono font-bold tabular-nums">
+              {formatChrono(elapsedTime)}
             </span>
             <span className="text-[10px] text-slate-400 font-mono border-l border-amber-900/60 pl-2">
-              Record : {formatChrono(speedrunRecords[selectedChapter] || 0)}
+              Rec: {formatChrono(speedrunRecords[selectedChapter] || 0)}
             </span>
           </div>
         ) : null}
 
         {/* Bossbar if Boss Chapter */}
         {(selectedChapter === 2 || selectedChapter === 4) && (
-          <div className="flex items-center gap-2 flex-1 max-w-sm">
-            <span className="text-xs text-rose-400 font-bold whitespace-nowrap font-cinzel">
-              {selectedChapter === 2 ? "Ignis Primus" : "L'Ombre du Vide"} :
+          <div className="flex items-center gap-2 flex-1 min-w-[180px] max-w-xs">
+            <span className="text-[11px] text-rose-400 font-bold whitespace-nowrap font-cinzel">
+              {selectedChapter === 2 ? "Ignis Primus" : "Ombre du Vide"}
             </span>
-            <div className="w-full h-3 bg-black rounded-sm overflow-hidden border border-rose-900">
+            <div className="w-full h-2.5 bg-black rounded-sm overflow-hidden border border-rose-900">
               <div
                 className="h-full bg-gradient-to-r from-orange-600 via-rose-500 to-purple-600 transition-all duration-100"
                 style={{ width: `${Math.max(0, (bossHp / maxBossHp) * 100)}%` }}
               />
             </div>
-            <span className="text-xs text-rose-300 font-mono tabular-nums">{bossHp}/{maxBossHp}</span>
+            <span className="text-[11px] text-rose-300 font-mono tabular-nums">{bossHp}/{maxBossHp}</span>
           </div>
         )}
 
-        {/* Shards & Golden Apples */}
-        <div className="flex items-center gap-4 text-xs font-mono">
-          <div className="flex items-center gap-1.5 text-purple-300 font-bold">
+        {/* Shards, Golden Apples & XP */}
+        <div className="flex items-center gap-3 text-[11px] font-mono">
+          <div className="flex items-center gap-1 text-purple-300 font-bold">
             <span>💎</span>
-            <span className="tabular-nums">{amethystShards} Éclats</span>
+            <span className="tabular-nums">{amethystShards}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-amber-300 font-bold">
+          <div className="flex items-center gap-1 text-amber-300 font-bold">
             <span>🍏</span>
-            <span className="tabular-nums">{goldenAppleCount} Pommes</span>
+            <span className="tabular-nums">{goldenAppleCount}</span>
           </div>
-          <div className="flex items-center gap-1.5 text-emerald-400 font-bold">
-            <span>Niv. {xpLevel}</span>
+          <div className="text-emerald-400 font-bold">
+            Niv.{xpLevel}
           </div>
         </div>
       </div>
 
-      {/* Main Canvas Viewport with Game Over & Victory Screens */}
-      <div className="relative bg-black flex items-center justify-center min-h-[460px]">
+      {/* Main Canvas Viewport (Fills remaining 100vh space with retractable overlay panels) */}
+      <div className="relative flex-1 min-h-0 bg-black flex items-center justify-center overflow-hidden [container-type:size]">
         <canvas
           ref={canvasRef}
           width={840}
           height={480}
           onMouseMove={handleCanvasMouseMove}
           onClick={handleCanvasClick}
-          className="w-full max-h-[480px] object-contain cursor-crosshair select-none"
+          className="w-[min(100cqw,calc(100cqh*7/4))] h-[min(100cqh,calc(100cqw*4/7))] cursor-crosshair select-none"
         />
+
+        {/* Retractable Panneau des Paramètres & Instructions (Overlay so zero page scroll) */}
+        {showSettings && (
+          <div className="absolute top-0 left-0 right-0 z-30 max-h-full overflow-y-auto px-5 py-4 bg-[#140e29]/95 backdrop-blur-md border-b border-purple-800/70 space-y-3 shadow-2xl animate-in fade-in duration-150">
+            <div className="flex items-center justify-between border-b border-purple-900/40 pb-2.5">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-purple-400" />
+                <h4 className="text-sm font-bold text-white font-cinzel">
+                  Paramètres du Jeu, Plein Écran & Commandes
+                </h4>
+              </div>
+              <button
+                onClick={() => setShowSettings(false)}
+                className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-300 hover:text-white bg-black/40 rounded border border-purple-800/50 hover:bg-purple-900/40 cursor-pointer"
+                title="Réduire le panneau"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Fermer</span>
+              </button>
+            </div>
+
+            {/* Section 1: Mode Plein Écran & Instruction Contextuelle Claire */}
+            <div className="p-3.5 rounded-xl bg-[#0d091d] border border-purple-800/50 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-purple-900/60 border border-purple-600/50 flex items-center justify-center text-purple-300">
+                    <Monitor className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white flex items-center gap-2">
+                      <span>Mode Plein Écran (API Fullscreen)</span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                        isFullscreen 
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 font-bold'
+                          : 'bg-slate-800 text-slate-400 border-slate-700'
+                      }`}>
+                        {isFullscreen ? "● ACTIVÉ" : "○ DÉSACTIVÉ"}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-purple-300">
+                      Affiche l'arène interactive sur toute la surface de votre moniteur
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={toggleFullscreen}
+                  className={`flex items-center gap-2 px-4 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-md ${
+                    isFullscreen
+                      ? 'bg-rose-950/80 hover:bg-rose-900 text-rose-200 border border-rose-600/60'
+                      : 'bg-purple-600 hover:bg-purple-500 text-white shadow-purple-600/30'
+                  }`}
+                >
+                  {isFullscreen ? <Minimize className="w-3.5 h-3.5" /> : <Maximize className="w-3.5 h-3.5" />}
+                  <span>{isFullscreen ? "Quitter le Plein Écran" : "Basculer en Plein Écran"}</span>
+                </button>
+              </div>
+
+              <div className="p-3 rounded-lg bg-[#181132] border border-purple-900/60 text-xs text-slate-300 space-y-1.5 leading-relaxed">
+                <div className="flex items-center gap-1.5 font-semibold text-amber-300 text-[11px] uppercase tracking-wide">
+                  <HelpCircle className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Instruction contextuelle du Mode Plein Écran :</span>
+                </div>
+                <p>
+                  Le <strong>Mode Plein Écran</strong> fait appel à l'<strong>API Fullscreen native de votre navigateur</strong> (<code>requestFullscreen()</code>) pour projeter l'ensemble de l'arène de jeu (canvas, barres d'action, compagnon Kaelen et barre de vie de boss) sur tout votre écran. Cela élimine les distractions extérieures et optimise la précision de vos déplacements et tirs.
+                </p>
+                <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-purple-200 bg-purple-950/60 p-2 rounded border border-purple-800/40">
+                  <span className="font-bold text-white">Raccourci de sortie :</span>
+                  <span>Appuyez sur <kbd className="px-1.5 py-0.5 bg-black/80 rounded border border-purple-700 text-amber-300 font-mono text-[10px]">Échap (Esc)</kbd> ou cliquez sur <em>Quitter le Plein Écran</em> pour revenir en mode fenêtré.</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Commandes & Raccourcis Rapides */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-[#0d091d] border border-purple-900/40 space-y-1">
+                <div className="font-semibold text-white flex items-center gap-1.5">
+                  <Swords className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Déplacements & Frappes</span>
+                </div>
+                <ul className="text-slate-400 text-[11px] space-y-1">
+                  <li>• <strong className="text-slate-200">ZQSD / WASD / Flèches</strong> : Diriger le héros masqué</li>
+                  <li>• <strong className="text-slate-200">Clic Gauche</strong> : Attaque à l'épée ou miner des cristaux</li>
+                  <li>• <strong className="text-slate-200">Kaelen & Volt</strong> : Attaques d'assistance automatiques</li>
+                </ul>
+              </div>
+
+              <div className="p-3 rounded-xl bg-[#0d091d] border border-purple-900/40 space-y-1">
+                <div className="font-semibold text-white flex items-center gap-1.5">
+                  <Zap className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Barre d'action rapide (Touches 1 à 7)</span>
+                </div>
+                <ul className="text-slate-400 text-[11px] space-y-1">
+                  <li>• <strong className="text-slate-200">1</strong> : Épée Netherite · <strong className="text-slate-200">2</strong> : Gant d'Écho</li>
+                  <li>• <strong className="text-slate-200">3</strong> : Grappin Cinétique · <strong className="text-slate-200">4</strong> : Lame-Flash</li>
+                  <li>• <strong className="text-slate-200">5</strong> : Phare de Volt · <strong className="text-slate-200">6</strong> : Pomme Dorée · <strong className="text-slate-200">7</strong> : Pioche</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Retractable Speedrun Leaderboard Panel Drawer (Overlay so zero page scroll) */}
+        {showLeaderboard && (
+          <div className="absolute top-0 left-0 right-0 z-30 max-h-full overflow-y-auto px-5 py-4 bg-[#140e29]/95 backdrop-blur-md border-b border-amber-500/40 space-y-3 shadow-2xl animate-in fade-in duration-150">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-amber-400" />
+                <h4 className="text-sm font-bold text-white font-cinzel">Tableau des Records de Vitesse Personnels</h4>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => {
+                    const defaults = { 1: 34.5, 2: 52.8, 3: 41.2, 4: 78.4 };
+                    setSpeedrunRecords(defaults);
+                    localStorage.setItem('voxelcraft_speedrun_records', JSON.stringify(defaults));
+                    soundFx.playAmethystChime(1.5);
+                  }}
+                  className="text-[11px] text-slate-400 hover:text-rose-400 underline cursor-pointer"
+                >
+                  Réinitialiser les records
+                </button>
+                <button
+                  onClick={() => setShowLeaderboard(false)}
+                  className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-300 hover:text-white bg-black/40 rounded border border-purple-800/50 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Fermer</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+              {[
+                { ch: 1, name: "Village Cristallisé", boss: "Zombies" },
+                { ch: 2, name: "Mer de Lave", boss: "Ignis Primus" },
+                { ch: 3, name: "Forteresse End", boss: "Rôdeurs" },
+                { ch: 4, name: "Faille Finale", boss: "Ombre du Vide" }
+              ].map(lvl => {
+                const rec = speedrunRecords[lvl.ch] || 999;
+                const rank = getSpeedrunRank(lvl.ch, rec);
+
+                return (
+                  <div key={lvl.ch} className="p-3 rounded-xl bg-[#0b0817] border border-purple-900/40 space-y-1">
+                    <div className="text-[11px] text-slate-400 font-mono">Acte 0{lvl.ch} · {lvl.boss}</div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-base font-bold font-mono text-amber-300 tabular-nums">
+                        {formatChrono(rec)}
+                      </span>
+                      <span 
+                        className="text-xs font-bold font-mono px-2 py-0.5 rounded border"
+                        style={{ color: rank.color, borderColor: rank.color, backgroundColor: `${rank.color}15` }}
+                      >
+                        {rank.rank}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* GAME OVER SCREEN OVERLAY */}
         {gameState === 'GAME_OVER' && (
@@ -1625,113 +1860,107 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ initialChapter = 1 }) =>
           </div>
         )}
 
-        {/* Floating Quick Key Legend */}
-        <div className="absolute top-3 left-4 pointer-events-none text-[11px] text-slate-300 bg-black/70 px-3 py-1.5 rounded-lg border border-purple-900/40">
-          ZQSD / WASD : Se déplacer · Clic : Frapper/Miner · 1 à 7 : Sélectionner un objet
-        </div>
       </div>
 
-      {/* Dynamic Kaelen Punchline Bar */}
-      <div className="px-5 py-3 bg-[#130f24] border-t border-purple-900/40 flex items-center gap-3">
-        <div className="w-7 h-7 rounded-full bg-purple-900/70 border border-purple-500/50 flex items-center justify-center shrink-0">
-          <Zap className="w-3.5 h-3.5 text-purple-300" />
-        </div>
-        <div className="flex-1 text-xs sm:text-sm text-purple-200 italic truncate font-sans">
-          <span className="font-bold text-purple-400 not-italic mr-2">[Kaelen]</span>
-          {kaelenQuote}
-        </div>
-        <button
-          onClick={() => soundFx.speakPunchline(kaelenQuote.replace(/[«»]/g, ''))}
-          className="px-2.5 py-1 text-xs text-purple-300 hover:text-white bg-purple-950/70 hover:bg-purple-900 border border-purple-700/50 rounded transition-colors whitespace-nowrap cursor-pointer shrink-0"
-        >
-          Voix de Kaelen
-        </button>
-      </div>
-
-      {/* Minecraft-Style 9-Slot Hotbar */}
-      <div className="p-4 bg-[#0a0815] border-t border-purple-950 flex flex-col items-center gap-3">
-        <div className="text-xs text-slate-400">
-          Barre d'action rapide (Cliquez ou appuyez sur 1-7) :
+      {/* Compact Bottom Strip: Kaelen Punchline & 7-Slot Hotbar */}
+      <div className="shrink-0 bg-[#0a0815] border-t border-purple-900/40">
+        {/* Slim Dynamic Kaelen Punchline Bar */}
+        <div className="px-3 py-1 bg-[#130f24] border-b border-purple-900/30 flex items-center gap-2">
+          <Zap className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+          <div className="flex-1 text-xs text-purple-200 italic truncate font-sans">
+            <span className="font-bold text-purple-400 not-italic mr-1.5">[Kaelen]</span>
+            {kaelenQuote}
+          </div>
+          <button
+            onClick={() => soundFx.speakPunchline(kaelenQuote.replace(/[«»]/g, ''))}
+            className="px-2 py-0.5 text-[11px] text-purple-300 hover:text-white bg-purple-950/70 hover:bg-purple-900 border border-purple-700/50 rounded transition-colors whitespace-nowrap cursor-pointer shrink-0"
+          >
+            Voix
+          </button>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1">
-          {hotbarItems.map(item => {
-            const isActive = activeSlot === item.slot;
+        {/* Compact Minecraft-Style Hotbar */}
+        <div className="px-3 py-2 flex flex-wrap items-center justify-center sm:justify-between gap-2">
+          <div className="flex items-center gap-1.5 overflow-x-auto max-w-full">
+            {hotbarItems.map(item => {
+              const isActive = activeSlot === item.slot;
 
-            return (
-              <button
-                key={item.slot}
-                onClick={() => triggerActiveSlot(item.slot)}
-                className={`relative w-12 h-12 sm:w-14 sm:h-14 rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer group ${
-                  isActive
-                    ? 'bg-purple-800/80 border-2 border-purple-300 shadow-[0_0_15px_rgba(168,85,247,0.5)] scale-105'
-                    : 'bg-[#151128] border border-purple-900/60 hover:bg-[#1f193d] hover:border-purple-700'
-                }`}
-                title={`${item.name} (${item.desc})`}
-              >
-                <span className="absolute top-1 left-1.5 text-[9px] font-mono text-slate-400 group-hover:text-purple-300">
-                  {item.key}
-                </span>
-
-                <div className="group-hover:scale-110 transition-transform">
-                  {item.icon}
-                </div>
-
-                {item.count !== undefined && (
-                  <span className="absolute bottom-1 right-1.5 text-[10px] font-mono font-bold text-amber-300">
-                    {item.count}
+              return (
+                <button
+                  key={item.slot}
+                  onClick={() => triggerActiveSlot(item.slot)}
+                  className={`relative w-10 h-10 sm:w-11 sm:h-11 rounded-lg flex flex-col items-center justify-center transition-all cursor-pointer group shrink-0 ${
+                    isActive
+                      ? 'bg-purple-800/80 border-2 border-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.5)] scale-105'
+                      : 'bg-[#151128] border border-purple-900/60 hover:bg-[#1f193d] hover:border-purple-700'
+                  }`}
+                  title={`${item.name} — ${item.desc} (Touche ${item.key})`}
+                >
+                  <span className="absolute top-0.5 left-1 text-[9px] font-mono text-slate-400 group-hover:text-purple-300 leading-none">
+                    {item.key}
                   </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
 
-        <div className="text-xs text-purple-300/90 font-medium">
-          Objet actif : <strong className="text-white">{hotbarItems.find(i => i.slot === activeSlot)?.name}</strong> — {hotbarItems.find(i => i.slot === activeSlot)?.desc}
-        </div>
+                  <div className="group-hover:scale-110 transition-transform">
+                    {item.icon}
+                  </div>
 
-        {/* Mobile On-Screen Direction Buttons for Touchscreens */}
-        <div className="sm:hidden flex items-center justify-center gap-2 pt-2 border-t border-purple-950/60 w-full">
-          <div className="grid grid-cols-3 gap-1.5 w-36">
-            <div />
-            <button
-              onPointerDown={() => { stateRef.current.keys['up'] = true; }}
-              onPointerUp={() => { stateRef.current.keys['up'] = false; }}
-              className="p-3 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
-            >
-              <ArrowUp className="w-4 h-4" />
-            </button>
-            <div />
-            <button
-              onPointerDown={() => { stateRef.current.keys['left'] = true; }}
-              onPointerUp={() => { stateRef.current.keys['left'] = false; }}
-              className="p-3 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <button
-              onPointerDown={() => { stateRef.current.keys['down'] = true; }}
-              onPointerUp={() => { stateRef.current.keys['down'] = false; }}
-              className="p-3 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
-            >
-              <ArrowDown className="w-4 h-4" />
-            </button>
-            <button
-              onPointerDown={() => { stateRef.current.keys['right'] = true; }}
-              onPointerUp={() => { stateRef.current.keys['right'] = false; }}
-              className="p-3 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
-            >
-              <ArrowRight className="w-4 h-4" />
-            </button>
+                  {item.count !== undefined && (
+                    <span className="absolute bottom-0.5 right-1 text-[9px] font-mono font-bold text-amber-300 leading-none">
+                      {item.count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
 
-          <button
-            onClick={() => triggerActiveSlot(activeSlot)}
-            className="flex-1 py-4 px-3 bg-purple-600 active:bg-purple-700 text-white rounded-xl font-bold text-xs"
-          >
-            ACTION / FRAPPE
-          </button>
+          <div className="hidden md:flex items-center gap-2 text-xs text-purple-300/90">
+            <strong className="text-white">{hotbarItems.find(i => i.slot === activeSlot)?.name}</strong>
+            <span className="text-slate-400">— {hotbarItems.find(i => i.slot === activeSlot)?.desc}</span>
+          </div>
+
+          {/* Mobile On-Screen Direction Buttons for Touchscreens */}
+          <div className="sm:hidden flex items-center justify-center gap-2 pt-1.5 border-t border-purple-950/60 w-full">
+            <div className="grid grid-cols-3 gap-1 w-32">
+              <div />
+              <button
+                onPointerDown={() => { stateRef.current.keys['up'] = true; }}
+                onPointerUp={() => { stateRef.current.keys['up'] = false; }}
+                className="p-2 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <div />
+              <button
+                onPointerDown={() => { stateRef.current.keys['left'] = true; }}
+                onPointerUp={() => { stateRef.current.keys['left'] = false; }}
+                className="p-2 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onPointerDown={() => { stateRef.current.keys['down'] = true; }}
+                onPointerUp={() => { stateRef.current.keys['down'] = false; }}
+                className="p-2 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onPointerDown={() => { stateRef.current.keys['right'] = true; }}
+                onPointerUp={() => { stateRef.current.keys['right'] = false; }}
+                className="p-2 bg-purple-950/80 border border-purple-800 rounded flex items-center justify-center text-white"
+              >
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <button
+              onClick={() => triggerActiveSlot(activeSlot)}
+              className="flex-1 py-3 px-3 bg-purple-600 active:bg-purple-700 text-white rounded-xl font-bold text-xs"
+            >
+              ACTION / FRAPPE
+            </button>
+          </div>
         </div>
       </div>
     </div>
